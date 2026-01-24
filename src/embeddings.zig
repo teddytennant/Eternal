@@ -72,13 +72,12 @@ pub const TfIdfEmbedder = struct {
     /// Stop word hashes for fast lookup
     stop_word_hashes: std.AutoHashMapUnmanaged(u64, void),
 
-    pub fn init(allocator: Allocator) !TfIdfEmbedder {
-        var embedder = TfIdfEmbedder{
-            .allocator = allocator,
-            .doc_freq = .{},
-            .num_docs = 0,
-            .stop_word_hashes = .{},
-        };
+    /// Initialize embedder in place (to avoid struct copy issues with hash maps)
+    pub fn initInPlace(self: *TfIdfEmbedder, allocator: Allocator) !void {
+        self.allocator = allocator;
+        self.doc_freq = .{};
+        self.num_docs = 0;
+        self.stop_word_hashes = .{};
 
         // Initialize common English stop words (stored as hashes)
         const stop_word_list = [_][]const u8{
@@ -100,11 +99,19 @@ pub const TfIdfEmbedder = struct {
             "its",    "they",  "them",   "their",   "what",  "which",  "who",
         };
 
+        // Pre-allocate to ensure capacity
+        try self.stop_word_hashes.ensureTotalCapacity(allocator, @intCast(stop_word_list.len));
+
         for (stop_word_list) |word| {
             const hash = hashTermStatic(word);
-            try embedder.stop_word_hashes.put(allocator, hash, {});
+            try self.stop_word_hashes.put(allocator, hash, {});
         }
+    }
 
+    /// Create and return an embedder (convenience wrapper, allocates on heap)
+    pub fn init(allocator: Allocator) !TfIdfEmbedder {
+        var embedder: TfIdfEmbedder = undefined;
+        try embedder.initInPlace(allocator);
         return embedder;
     }
 
@@ -130,7 +137,8 @@ pub const TfIdfEmbedder = struct {
             } else {
                 if (start) |s| {
                     const token = text[s..idx];
-                    if (token.len >= 2 and !self.isStopWord(token)) {
+                    const is_stop = self.isStopWord(token);
+                    if (token.len >= 2 and !is_stop) {
                         try tokens.append(self.allocator, token);
                     }
                     start = null;
@@ -141,7 +149,8 @@ pub const TfIdfEmbedder = struct {
         // Handle last token
         if (start) |s| {
             const token = text[s..];
-            if (token.len >= 2 and !self.isStopWord(token)) {
+            const is_stop = self.isStopWord(token);
+            if (token.len >= 2 and !is_stop) {
                 try tokens.append(self.allocator, token);
             }
         }
@@ -150,13 +159,13 @@ pub const TfIdfEmbedder = struct {
     }
 
     /// Check if a token is a stop word (case-insensitive)
-    fn isStopWord(self: *TfIdfEmbedder, token: []const u8) bool {
+    fn isStopWord(self: *const TfIdfEmbedder, token: []const u8) bool {
         const hash = hashTermStatic(token);
         return self.stop_word_hashes.contains(hash);
     }
 
     /// Hash a term for storage (case-insensitive) - static version
-    fn hashTermStatic(term: []const u8) u64 {
+    pub fn hashTermStatic(term: []const u8) u64 {
         var hash: u64 = 5381;
         for (term) |c| {
             // Convert to lowercase for hashing
@@ -184,8 +193,14 @@ pub const TfIdfEmbedder = struct {
             const hash = self.hashTerm(token);
             if (!seen_terms.contains(hash)) {
                 try seen_terms.put(self.allocator, hash, {});
-                const current = self.doc_freq.get(hash) orelse 0;
-                try self.doc_freq.put(self.allocator, hash, current + 1);
+                
+                // Use getOrPut to ensure safer access
+                const result = try self.doc_freq.getOrPut(self.allocator, hash);
+                if (result.found_existing) {
+                    result.value_ptr.* += 1;
+                } else {
+                    result.value_ptr.* = 1;
+                }
             }
         }
 

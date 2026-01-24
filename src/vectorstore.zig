@@ -34,7 +34,10 @@ pub const VectorStore = struct {
     pub fn init(allocator: Allocator) !VectorStore {
         const embedder = try allocator.create(embeddings.TfIdfEmbedder);
         errdefer allocator.destroy(embedder);
-        embedder.* = try embeddings.TfIdfEmbedder.init(allocator);
+        
+        // Initialize embedder
+        try embedder.initInPlace(allocator);
+
         return .{
             .allocator = allocator,
             .documents = .{},
@@ -171,7 +174,7 @@ pub const VectorStore = struct {
         }
         self.documents.clearRetainingCapacity();
         self.embedder.deinit();
-        self.embedder.* = embeddings.TfIdfEmbedder.init(self.allocator) catch unreachable;
+        self.embedder.initInPlace(self.allocator) catch unreachable;
         self.next_id = 0;
     }
 

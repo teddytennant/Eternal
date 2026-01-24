@@ -28,14 +28,17 @@ pub const SearchResult = struct {
 pub const VectorStore = struct {
     allocator: Allocator,
     documents: std.ArrayListUnmanaged(StoredDocument),
-    embedder: embeddings.TfIdfEmbedder,
+    embedder: *embeddings.TfIdfEmbedder,
     next_id: u64,
 
     pub fn init(allocator: Allocator) !VectorStore {
+        const embedder = try allocator.create(embeddings.TfIdfEmbedder);
+        errdefer allocator.destroy(embedder);
+        embedder.* = try embeddings.TfIdfEmbedder.init(allocator);
         return .{
             .allocator = allocator,
             .documents = .{},
-            .embedder = try embeddings.TfIdfEmbedder.init(allocator),
+            .embedder = embedder,
             .next_id = 0,
         };
     }
@@ -46,6 +49,7 @@ pub const VectorStore = struct {
         }
         self.documents.deinit(self.allocator);
         self.embedder.deinit();
+        self.allocator.destroy(self.embedder);
     }
 
     /// Add a chunk to the store
@@ -167,7 +171,7 @@ pub const VectorStore = struct {
         }
         self.documents.clearRetainingCapacity();
         self.embedder.deinit();
-        self.embedder = embeddings.TfIdfEmbedder.init(self.allocator) catch unreachable;
+        self.embedder.* = embeddings.TfIdfEmbedder.init(self.allocator) catch unreachable;
         self.next_id = 0;
     }
 

@@ -100,10 +100,11 @@ pub const Rag = struct {
     }
 
     pub fn initWithConfig(allocator: Allocator, config: RagConfig) !Rag {
+        const store = try vectorstore.VectorStore.init(allocator);
         return .{
             .allocator = allocator,
             .config = config,
-            .store = try vectorstore.VectorStore.init(allocator),
+            .store = store,
             .text_chunker = chunker.Chunker.initWithConfig(allocator, config.chunker_config),
             .md_parser = markdown.Parser.init(allocator),
             .indexed_files = .{},

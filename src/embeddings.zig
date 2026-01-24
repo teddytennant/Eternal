@@ -69,18 +69,18 @@ pub const TfIdfEmbedder = struct {
     doc_freq: std.AutoHashMapUnmanaged(u64, u32),
     /// Total number of documents
     num_docs: u32,
-    /// Stop words to ignore
-    stop_words: std.StringHashMapUnmanaged(void),
+    /// Stop word hashes for fast lookup
+    stop_word_hashes: std.AutoHashMapUnmanaged(u64, void),
 
     pub fn init(allocator: Allocator) !TfIdfEmbedder {
         var embedder = TfIdfEmbedder{
             .allocator = allocator,
             .doc_freq = .{},
             .num_docs = 0,
-            .stop_words = .{},
+            .stop_word_hashes = .{},
         };
 
-        // Initialize common English stop words
+        // Initialize common English stop words (stored as hashes)
         const stop_word_list = [_][]const u8{
             "a",      "an",    "the",    "is",      "are",   "was",    "were",
             "be",     "been",  "being",  "have",    "has",   "had",    "do",
@@ -101,7 +101,8 @@ pub const TfIdfEmbedder = struct {
         };
 
         for (stop_word_list) |word| {
-            try embedder.stop_words.put(allocator, word, {});
+            const hash = hashTermStatic(word);
+            try embedder.stop_word_hashes.put(allocator, hash, {});
         }
 
         return embedder;
@@ -109,7 +110,7 @@ pub const TfIdfEmbedder = struct {
 
     pub fn deinit(self: *TfIdfEmbedder) void {
         self.doc_freq.deinit(self.allocator);
-        self.stop_words.deinit(self.allocator);
+        self.stop_word_hashes.deinit(self.allocator);
     }
 
     /// Tokenize text into terms
@@ -129,7 +130,7 @@ pub const TfIdfEmbedder = struct {
             } else {
                 if (start) |s| {
                     const token = text[s..idx];
-                    if (token.len >= 2 and !self.stop_words.contains(self.toLower(token))) {
+                    if (token.len >= 2 and !self.isStopWord(token)) {
                         try tokens.append(self.allocator, token);
                     }
                     start = null;
@@ -140,7 +141,7 @@ pub const TfIdfEmbedder = struct {
         // Handle last token
         if (start) |s| {
             const token = text[s..];
-            if (token.len >= 2 and !self.stop_words.contains(self.toLower(token))) {
+            if (token.len >= 2 and !self.isStopWord(token)) {
                 try tokens.append(self.allocator, token);
             }
         }
@@ -148,15 +149,14 @@ pub const TfIdfEmbedder = struct {
         return tokens;
     }
 
-    fn toLower(self: *TfIdfEmbedder, text: []const u8) []const u8 {
-        _ = self;
-        // For stop word checking, we just check if it matches common lowercase patterns
-        return text;
+    /// Check if a token is a stop word (case-insensitive)
+    fn isStopWord(self: *TfIdfEmbedder, token: []const u8) bool {
+        const hash = hashTermStatic(token);
+        return self.stop_word_hashes.contains(hash);
     }
 
-    /// Hash a term for storage
-    fn hashTerm(self: *TfIdfEmbedder, term: []const u8) u64 {
-        _ = self;
+    /// Hash a term for storage (case-insensitive) - static version
+    fn hashTermStatic(term: []const u8) u64 {
         var hash: u64 = 5381;
         for (term) |c| {
             // Convert to lowercase for hashing
@@ -164,6 +164,12 @@ pub const TfIdfEmbedder = struct {
             hash = ((hash << 5) +% hash) +% lower;
         }
         return hash;
+    }
+
+    /// Hash a term for storage (case-insensitive)
+    fn hashTerm(self: *TfIdfEmbedder, term: []const u8) u64 {
+        _ = self;
+        return hashTermStatic(term);
     }
 
     /// Add a document to the corpus (updates IDF statistics)

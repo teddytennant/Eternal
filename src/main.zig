@@ -3,6 +3,12 @@ const Eternal = @import("Eternal");
 
 const version = "0.1.0";
 
+/// Get a buffered stdout writer
+fn getStdout() std.fs.File.Writer {
+    var buf: [0]u8 = undefined;
+    return std.fs.File.stdout().writer(&buf);
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -12,19 +18,19 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        try printUsage();
+        printUsage();
         return;
     }
 
     const command = args[1];
 
     if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
-        try printUsage();
+        printUsage();
         return;
     }
 
     if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
-        try printVersion();
+        printVersion();
         return;
     }
 
@@ -49,14 +55,11 @@ pub fn main() !void {
     }
 
     std.debug.print("Unknown command: {s}\n", .{command});
-    try printUsage();
+    printUsage();
 }
 
-fn printUsage() !void {
-    var stdout_buffer: [8192]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
-    try stdout.print(
+fn printUsage() void {
+    std.debug.print(
         \\Eternal - Markdown-based RAG system for continual learning
         \\
         \\Usage: eternal <command> [options]
@@ -80,15 +83,10 @@ fn printUsage() !void {
         \\  eternal stats
         \\
     , .{});
-    try stdout.flush();
 }
 
-fn printVersion() !void {
-    var stdout_buffer: [256]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
-    try stdout.print("Eternal v{s}\n", .{version});
-    try stdout.flush();
+fn printVersion() void {
+    std.debug.print("Eternal v{s}\n", .{version});
 }
 
 fn getIndexPath(args: []const []const u8) []const u8 {
@@ -121,13 +119,8 @@ fn ensureIndexDir(index_path: []const u8) !void {
 }
 
 fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
-
     if (args.len == 0) {
-        try stdout.print("Error: Please provide a path to index\n", .{});
-        try stdout.flush();
+        std.debug.print("Error: Please provide a path to index\n", .{});
         return;
     }
 
@@ -143,13 +136,11 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     if (target_path == null) {
-        try stdout.print("Error: Please provide a path to index\n", .{});
-        try stdout.flush();
+        std.debug.print("Error: Please provide a path to index\n", .{});
         return;
     }
 
-    try stdout.print("Indexing: {s}\n", .{target_path.?});
-    try stdout.flush();
+    std.debug.print("Indexing: {s}\n", .{target_path.?});
 
     var rag_instance = try Eternal.Rag.init(allocator);
     defer rag_instance.deinit();
@@ -162,8 +153,7 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
     // Check if path is a file or directory
     const stat = std.fs.cwd().statFile(target_path.?) catch |err| {
         if (err == error.FileNotFound) {
-            try stdout.print("Error: Path not found: {s}\n", .{target_path.?});
-            try stdout.flush();
+            std.debug.print("Error: Path not found: {s}\n", .{target_path.?});
             return;
         }
         return err;
@@ -182,23 +172,17 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
         num_docs = 1;
     }
 
-    try stdout.print("Indexed {d} document(s), {d} chunk(s)\n", .{ num_docs, num_chunks });
+    std.debug.print("Indexed {d} document(s), {d} chunk(s)\n", .{ num_docs, num_chunks });
 
     // Save the index
     try ensureIndexDir(index_path);
     try rag_instance.save(index_path);
-    try stdout.print("Index saved to: {s}\n", .{index_path});
-    try stdout.flush();
+    std.debug.print("Index saved to: {s}\n", .{index_path});
 }
 
 fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    var stdout_buffer: [16384]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
-
     if (args.len == 0) {
-        try stdout.print("Error: Please provide a query\n", .{});
-        try stdout.flush();
+        std.debug.print("Error: Please provide a query\n", .{});
         return;
     }
 
@@ -221,8 +205,7 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     if (query_parts.items.len == 0) {
-        try stdout.print("Error: Please provide a query\n", .{});
-        try stdout.flush();
+        std.debug.print("Error: Please provide a query\n", .{});
         return;
     }
 
@@ -244,9 +227,8 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     // Load the index
     rag_instance.load(index_path) catch {
-        try stdout.print("Error: No index found at {s}\n", .{index_path});
-        try stdout.print("Run 'eternal index <path>' first to create an index.\n", .{});
-        try stdout.flush();
+        std.debug.print("Error: No index found at {s}\n", .{index_path});
+        std.debug.print("Run 'eternal index <path>' first to create an index.\n", .{});
         return;
     };
 
@@ -254,19 +236,27 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer result.deinit();
 
     if (result.contexts.items.len == 0) {
-        try stdout.print("No relevant results found for: {s}\n", .{query_text.items});
-        try stdout.flush();
+        std.debug.print("No relevant results found for: {s}\n", .{query_text.items});
         return;
     }
 
-    try result.format(stdout);
-    try stdout.flush();
+    // Format and print results
+    std.debug.print("Query: {s}\n", .{result.query});
+    std.debug.print("Found {d} relevant contexts:\n\n", .{result.contexts.items.len});
+
+    for (result.contexts.items, 0..) |ctx, idx| {
+        std.debug.print("--- Context {d} (score: {d:.3}) ---\n", .{ idx + 1, ctx.score });
+        if (ctx.source) |src| {
+            std.debug.print("Source: {s}\n", .{src});
+        }
+        if (ctx.heading) |heading| {
+            std.debug.print("Section: {s}\n", .{heading});
+        }
+        std.debug.print("{s}\n\n", .{ctx.content});
+    }
 }
 
 fn handleStats(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    var stdout_buffer: [8192]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
     const index_path = getIndexPath(args);
 
     var rag_instance = try Eternal.Rag.init(allocator);
@@ -274,47 +264,40 @@ fn handleStats(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     // Load the index
     rag_instance.load(index_path) catch {
-        try stdout.print("No index found at {s}\n", .{index_path});
-        try stdout.flush();
+        std.debug.print("No index found at {s}\n", .{index_path});
         return;
     };
 
     var stats = try rag_instance.getStats();
     defer stats.deinit(allocator);
 
-    try stdout.print("Index Statistics:\n", .{});
-    try stdout.print("  Index path: {s}\n", .{index_path});
-    try stdout.print("  Documents: {d}\n", .{stats.num_documents});
-    try stdout.print("  Chunks: {d}\n", .{stats.num_chunks});
+    std.debug.print("Index Statistics:\n", .{});
+    std.debug.print("  Index path: {s}\n", .{index_path});
+    std.debug.print("  Documents: {d}\n", .{stats.num_documents});
+    std.debug.print("  Chunks: {d}\n", .{stats.num_chunks});
 
     if (stats.sources.items.len > 0) {
-        try stdout.print("\nIndexed files:\n", .{});
+        std.debug.print("\nIndexed files:\n", .{});
         for (stats.sources.items) |source| {
-            try stdout.print("  - {s}\n", .{source});
+            std.debug.print("  - {s}\n", .{source});
         }
     }
-    try stdout.flush();
 }
 
 fn handleClear(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
+    _ = allocator;
     const index_path = getIndexPath(args);
 
     // Delete the index file
     std.fs.cwd().deleteFile(index_path) catch |err| {
         if (err == error.FileNotFound) {
-            try stdout.print("No index found at {s}\n", .{index_path});
-            try stdout.flush();
+            std.debug.print("No index found at {s}\n", .{index_path});
             return;
         }
         return err;
     };
 
-    _ = allocator;
-    try stdout.print("Index cleared: {s}\n", .{index_path});
-    try stdout.flush();
+    std.debug.print("Index cleared: {s}\n", .{index_path});
 }
 
 test "main module" {

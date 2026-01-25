@@ -203,13 +203,17 @@ pub const Chunker = struct {
             );
             try chunks.append(self.allocator, chunk);
 
-            // Move start with overlap
-            start = if (end > self.config.chunk_overlap)
+            // If we've reached the end, we're done
+            if (end >= text.len) break;
+
+            // Move start with overlap, ensuring forward progress
+            const new_start = if (end > self.config.chunk_overlap)
                 end - self.config.chunk_overlap
             else
                 end;
 
-            if (start >= text.len) break;
+            // Ensure we always make forward progress
+            start = if (new_start <= start) end else new_start;
         }
 
         return chunks;

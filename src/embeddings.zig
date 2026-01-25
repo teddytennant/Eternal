@@ -81,22 +81,22 @@ pub const TfIdfEmbedder = struct {
 
         // Initialize common English stop words (stored as hashes)
         const stop_word_list = [_][]const u8{
-            "a",      "an",    "the",    "is",      "are",   "was",    "were",
-            "be",     "been",  "being",  "have",    "has",   "had",    "do",
-            "does",   "did",   "will",   "would",   "could", "should", "may",
-            "might",  "must",  "shall",  "can",     "need",  "dare",   "ought",
-            "used",   "to",    "of",     "in",      "for",   "on",     "with",
-            "at",     "by",    "from",   "as",      "into",  "through", "during",
-            "before", "after", "above",  "below",   "between", "under", "again",
-            "further", "then", "once",   "here",    "there", "when",   "where",
-            "why",    "how",   "all",    "each",    "few",   "more",   "most",
-            "other",  "some",  "such",   "no",      "nor",   "not",    "only",
-            "own",    "same",  "so",     "than",    "too",   "very",   "just",
-            "and",    "but",   "if",     "or",      "because", "until", "while",
-            "this",   "that",  "these",  "those",   "i",     "me",     "my",
-            "myself", "we",    "our",    "ours",    "you",   "your",   "yours",
-            "he",     "him",   "his",    "she",     "her",   "hers",   "it",
-            "its",    "they",  "them",   "their",   "what",  "which",  "who",
+            "a",       "an",    "the",   "is",    "are",     "was",     "were",
+            "be",      "been",  "being", "have",  "has",     "had",     "do",
+            "does",    "did",   "will",  "would", "could",   "should",  "may",
+            "might",   "must",  "shall", "can",   "need",    "dare",    "ought",
+            "used",    "to",    "of",    "in",    "for",     "on",      "with",
+            "at",      "by",    "from",  "as",    "into",    "through", "during",
+            "before",  "after", "above", "below", "between", "under",   "again",
+            "further", "then",  "once",  "here",  "there",   "when",    "where",
+            "why",     "how",   "all",   "each",  "few",     "more",    "most",
+            "other",   "some",  "such",  "no",    "nor",     "not",     "only",
+            "own",     "same",  "so",    "than",  "too",     "very",    "just",
+            "and",     "but",   "if",    "or",    "because", "until",   "while",
+            "this",    "that",  "these", "those", "i",       "me",      "my",
+            "myself",  "we",    "our",   "ours",  "you",     "your",    "yours",
+            "he",      "him",   "his",   "she",   "her",     "hers",    "it",
+            "its",     "they",  "them",  "their", "what",    "which",   "who",
         };
 
         // Pre-allocate to ensure capacity
@@ -104,7 +104,11 @@ pub const TfIdfEmbedder = struct {
 
         for (stop_word_list) |word| {
             const hash = hashTermStatic(word);
-            try self.stop_word_hashes.put(allocator, hash, {});
+            // Use putContext for better safety with unmanaged maps
+            const result = try self.stop_word_hashes.getOrPut(allocator, hash);
+            if (!result.found_existing) {
+                result.value_ptr.* = {};
+            }
         }
     }
 
@@ -193,7 +197,7 @@ pub const TfIdfEmbedder = struct {
             const hash = self.hashTerm(token);
             if (!seen_terms.contains(hash)) {
                 try seen_terms.put(self.allocator, hash, {});
-                
+
                 // Use getOrPut to ensure safer access
                 const result = try self.doc_freq.getOrPut(self.allocator, hash);
                 if (result.found_existing) {
@@ -265,41 +269,6 @@ pub const TfIdfEmbedder = struct {
         }
 
         return vectors;
-    }
-};
-
-/// Simple BM25 implementation for ranking
-pub const BM25 = struct {
-    k1: f32 = 1.2,
-    b: f32 = 0.75,
-    avg_doc_len: f32,
-    doc_freq: *std.AutoHashMapUnmanaged(u64, u32),
-    num_docs: u32,
-    allocator: Allocator,
-
-    pub fn score(self: *const BM25, query_terms: []const u64, doc_terms: std.AutoHashMapUnmanaged(u64, u32), doc_len: usize) f32 {
-        var total_score: f32 = 0;
-        const doc_len_f: f32 = @floatFromInt(doc_len);
-
-        for (query_terms) |term| {
-            const tf = doc_terms.get(term) orelse continue;
-            const df = self.doc_freq.get(term) orelse 1;
-
-            const tf_f: f32 = @floatFromInt(tf);
-            const df_f: f32 = @floatFromInt(df);
-            const num_docs_f: f32 = @floatFromInt(self.num_docs);
-
-            // IDF component
-            const idf = @log((num_docs_f - df_f + 0.5) / (df_f + 0.5) + 1);
-
-            // TF component with length normalization
-            const tf_norm = (tf_f * (self.k1 + 1)) /
-                (tf_f + self.k1 * (1 - self.b + self.b * (doc_len_f / self.avg_doc_len)));
-
-            total_score += idf * tf_norm;
-        }
-
-        return total_score;
     }
 };
 

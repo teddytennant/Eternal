@@ -39,7 +39,7 @@ Eternal provides the "R" (Retrieval) in a RAG pipeline. You use Eternal to find 
 
 ## Installation & Build
 
-Ensure you have [Zig](https://ziglang.org/download/) (0.11.0 or later) installed.
+Ensure you have [Zig](https://ziglang.org/download/) (0.15.2 or later) installed.
 
 ```bash
 # Clone the repository

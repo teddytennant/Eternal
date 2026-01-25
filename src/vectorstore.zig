@@ -30,11 +30,13 @@ pub const VectorStore = struct {
     documents: std.ArrayListUnmanaged(StoredDocument),
     embedder: *embeddings.TfIdfEmbedder,
     next_id: u64,
+    /// Inverted index: term_hash -> list of document indices for O(1) candidate lookup
+    inverted_index: std.AutoHashMapUnmanaged(u64, std.ArrayListUnmanaged(usize)),
 
     pub fn init(allocator: Allocator) !VectorStore {
         const embedder = try allocator.create(embeddings.TfIdfEmbedder);
         errdefer allocator.destroy(embedder);
-        
+
         // Initialize embedder
         try embedder.initInPlace(allocator);
 
@@ -43,6 +45,7 @@ pub const VectorStore = struct {
             .documents = .{},
             .embedder = embedder,
             .next_id = 0,
+            .inverted_index = .{},
         };
     }
 
@@ -51,6 +54,14 @@ pub const VectorStore = struct {
             doc.deinit(self.allocator);
         }
         self.documents.deinit(self.allocator);
+
+        // Clean up inverted index
+        var inv_iter = self.inverted_index.valueIterator();
+        while (inv_iter.next()) |list| {
+            list.deinit(self.allocator);
+        }
+        self.inverted_index.deinit(self.allocator);
+
         self.embedder.deinit();
         self.allocator.destroy(self.embedder);
     }
@@ -61,7 +72,8 @@ pub const VectorStore = struct {
         try self.embedder.addDocument(chunk.content);
 
         // Create embedding
-        const vector = try self.embedder.embed(chunk.content);
+        var vector = try self.embedder.embed(chunk.content);
+        errdefer vector.deinit();
 
         const id = self.next_id;
         self.next_id += 1;
@@ -76,11 +88,22 @@ pub const VectorStore = struct {
             .heading_context = if (chunk.heading_context) |h| try self.allocator.dupe(u8, h) else null,
         };
 
+        const doc_idx = self.documents.items.len;
         try self.documents.append(self.allocator, .{
             .id = id,
             .chunk = stored_chunk,
             .vector = vector,
         });
+
+        // Update inverted index: map each term to this document's index
+        var term_iter = vector.terms.keyIterator();
+        while (term_iter.next()) |term_hash| {
+            const result = try self.inverted_index.getOrPut(self.allocator, term_hash.*);
+            if (!result.found_existing) {
+                result.value_ptr.* = .{};
+            }
+            try result.value_ptr.append(self.allocator, doc_idx);
+        }
 
         return id;
     }
@@ -98,7 +121,7 @@ pub const VectorStore = struct {
         return ids;
     }
 
-    /// Search for similar documents
+    /// Search for similar documents using inverted index for candidate selection
     pub fn search(self: *VectorStore, query: []const u8, top_k: usize) !std.ArrayListUnmanaged(SearchResult) {
         var results: std.ArrayListUnmanaged(SearchResult) = .{};
         errdefer results.deinit(self.allocator);
@@ -111,7 +134,23 @@ pub const VectorStore = struct {
         var query_vec = try self.embedder.embed(query);
         defer query_vec.deinit();
 
-        // Score all documents
+        // Use inverted index to find candidate documents (docs sharing at least one term)
+        var candidate_set: std.AutoHashMapUnmanaged(usize, void) = .{};
+        defer candidate_set.deinit(self.allocator);
+
+        var query_term_iter = query_vec.terms.keyIterator();
+        while (query_term_iter.next()) |term_hash| {
+            if (self.inverted_index.get(term_hash.*)) |doc_indices| {
+                for (doc_indices.items) |doc_idx| {
+                    try candidate_set.put(self.allocator, doc_idx, {});
+                }
+            }
+        }
+
+        // If no candidates from inverted index (query has no matching terms),
+        // fall back to scanning all documents (rare case)
+        const use_candidates = candidate_set.count() > 0;
+
         const ScoredDoc = struct {
             idx: usize,
             score: f32,
@@ -120,10 +159,24 @@ pub const VectorStore = struct {
         var scored_docs: std.ArrayListUnmanaged(ScoredDoc) = .{};
         defer scored_docs.deinit(self.allocator);
 
-        for (self.documents.items, 0..) |doc, idx| {
-            const score = query_vec.cosineSimilarity(&doc.vector);
-            if (score > 0) {
-                try scored_docs.append(self.allocator, .{ .idx = idx, .score = score });
+        if (use_candidates) {
+            // Score only candidate documents (fast path)
+            var cand_iter = candidate_set.keyIterator();
+            while (cand_iter.next()) |idx_ptr| {
+                const idx = idx_ptr.*;
+                const doc = &self.documents.items[idx];
+                const score = query_vec.cosineSimilarity(&doc.vector);
+                if (score > 0) {
+                    try scored_docs.append(self.allocator, .{ .idx = idx, .score = score });
+                }
+            }
+        } else {
+            // Fallback: score all documents (slow path, only when query has no indexed terms)
+            for (self.documents.items, 0..) |doc, idx| {
+                const score = query_vec.cosineSimilarity(&doc.vector);
+                if (score > 0) {
+                    try scored_docs.append(self.allocator, .{ .idx = idx, .score = score });
+                }
             }
         }
 
@@ -156,10 +209,35 @@ pub const VectorStore = struct {
             if (doc.id == id) {
                 doc.deinit(self.allocator);
                 _ = self.documents.orderedRemove(idx);
+
+                // Rebuild inverted index since document indices shifted
+                self.rebuildInvertedIndex();
                 return true;
             }
         }
         return false;
+    }
+
+    /// Rebuild the inverted index from current documents
+    fn rebuildInvertedIndex(self: *VectorStore) void {
+        // Clear existing index
+        var inv_iter = self.inverted_index.valueIterator();
+        while (inv_iter.next()) |list| {
+            list.deinit(self.allocator);
+        }
+        self.inverted_index.clearRetainingCapacity();
+
+        // Rebuild from all documents
+        for (self.documents.items, 0..) |doc, idx| {
+            var term_iter = doc.vector.terms.keyIterator();
+            while (term_iter.next()) |term_hash| {
+                const result = self.inverted_index.getOrPut(self.allocator, term_hash.*) catch continue;
+                if (!result.found_existing) {
+                    result.value_ptr.* = .{};
+                }
+                result.value_ptr.append(self.allocator, idx) catch continue;
+            }
+        }
     }
 
     /// Get document count
@@ -168,13 +246,22 @@ pub const VectorStore = struct {
     }
 
     /// Clear all documents
-    pub fn clear(self: *VectorStore) void {
+    pub fn clear(self: *VectorStore) !void {
         for (self.documents.items) |*doc| {
             doc.deinit(self.allocator);
         }
         self.documents.clearRetainingCapacity();
+
+        // Clear inverted index
+        var inv_iter = self.inverted_index.valueIterator();
+        while (inv_iter.next()) |list| {
+            list.deinit(self.allocator);
+        }
+        self.inverted_index.clearRetainingCapacity();
+
+        // Reset embedder
         self.embedder.deinit();
-        self.embedder.initInPlace(self.allocator) catch unreachable;
+        try self.embedder.initInPlace(self.allocator);
         self.next_id = 0;
     }
 
@@ -226,9 +313,22 @@ pub const VectorStore = struct {
         var buffer: std.ArrayListUnmanaged(u8) = .{};
         errdefer buffer.deinit(allocator);
 
+        // Write magic number and version for format validation
+        try writeU32(&buffer, allocator, 0x45544E4C); // "ETNL" magic
+        try writeU32(&buffer, allocator, 2); // Format version 2 (with IDF stats)
+
         // Write header
         try writeU32(&buffer, allocator, @intCast(self.documents.items.len));
         try writeU64(&buffer, allocator, self.next_id);
+
+        // Write embedder state (IDF statistics) - CRITICAL for search quality
+        try writeU32(&buffer, allocator, self.embedder.num_docs);
+        try writeU32(&buffer, allocator, @intCast(self.embedder.doc_freq.count()));
+        var df_iter = self.embedder.doc_freq.iterator();
+        while (df_iter.next()) |entry| {
+            try writeU64(&buffer, allocator, entry.key_ptr.*);
+            try writeU32(&buffer, allocator, entry.value_ptr.*);
+        }
 
         // Write each document
         for (self.documents.items) |doc| {
@@ -278,11 +378,35 @@ pub const VectorStore = struct {
 
         var offset: usize = 0;
 
-        const num_docs = try readU32(data, &offset);
+        // Check for versioned format (magic number)
+        const first_u32 = try readU32(data, &offset);
+        var format_version: u32 = 1;
+
+        if (first_u32 == 0x45544E4C) {
+            // New versioned format
+            format_version = try readU32(data, &offset);
+        } else {
+            // Legacy format (no magic) - reset offset and treat first_u32 as num_docs
+            offset = 0;
+        }
+
+        const num_docs_stored = try readU32(data, &offset);
         store.next_id = try readU64(data, &offset);
 
+        // Restore embedder state if format version >= 2
+        if (format_version >= 2) {
+            store.embedder.num_docs = try readU32(data, &offset);
+            const df_count = try readU32(data, &offset);
+            var df_idx: u32 = 0;
+            while (df_idx < df_count) : (df_idx += 1) {
+                const term_hash = try readU64(data, &offset);
+                const freq = try readU32(data, &offset);
+                try store.embedder.doc_freq.put(allocator, term_hash, freq);
+            }
+        }
+
         var i: u32 = 0;
-        while (i < num_docs) : (i += 1) {
+        while (i < num_docs_stored) : (i += 1) {
             const id = try readU64(data, &offset);
 
             // Read chunk
@@ -338,6 +462,9 @@ pub const VectorStore = struct {
                 .vector = vector,
             });
         }
+
+        // Rebuild inverted index from loaded documents
+        store.rebuildInvertedIndex();
 
         return store;
     }

@@ -3,12 +3,6 @@ const Eternal = @import("Eternal");
 
 const version = "0.1.0";
 
-/// Get a buffered stdout writer
-fn getStdout() std.fs.File.Writer {
-    var buf: [0]u8 = undefined;
-    return std.fs.File.stdout().writer(&buf);
-}
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -58,8 +52,12 @@ pub fn main() !void {
     printUsage();
 }
 
+fn stdout() std.fs.File.Writer {
+    return std.io.getStdOut().writer();
+}
+
 fn printUsage() void {
-    std.debug.print(
+    stdout().print(
         \\Eternal - Markdown-based RAG system for continual learning
         \\
         \\Usage: eternal <command> [options]
@@ -82,11 +80,11 @@ fn printUsage() void {
         \\  eternal query "What is machine learning?"
         \\  eternal stats
         \\
-    , .{});
+    , .{}) catch {};
 }
 
 fn printVersion() void {
-    std.debug.print("Eternal v{s}\n", .{version});
+    stdout().print("Eternal v{s}\n", .{version}) catch {};
 }
 
 fn getIndexPath(args: []const []const u8) []const u8 {
@@ -119,6 +117,8 @@ fn ensureIndexDir(index_path: []const u8) !void {
 }
 
 fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const out = stdout();
+
     if (args.len == 0) {
         std.debug.print("Error: Please provide a path to index\n", .{});
         return;
@@ -140,7 +140,7 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
-    std.debug.print("Indexing: {s}\n", .{target_path.?});
+    try out.print("Indexing: {s}\n", .{target_path.?});
 
     var rag_instance = try Eternal.Rag.init(allocator);
     defer rag_instance.deinit();
@@ -172,15 +172,17 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
         num_docs = 1;
     }
 
-    std.debug.print("Indexed {d} document(s), {d} chunk(s)\n", .{ num_docs, num_chunks });
+    try out.print("Indexed {d} document(s), {d} chunk(s)\n", .{ num_docs, num_chunks });
 
     // Save the index
     try ensureIndexDir(index_path);
     try rag_instance.save(index_path);
-    std.debug.print("Index saved to: {s}\n", .{index_path});
+    try out.print("Index saved to: {s}\n", .{index_path});
 }
 
 fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const out = stdout();
+
     if (args.len == 0) {
         std.debug.print("Error: Please provide a query\n", .{});
         return;
@@ -236,27 +238,28 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer result.deinit();
 
     if (result.contexts.items.len == 0) {
-        std.debug.print("No relevant results found for: {s}\n", .{query_text.items});
+        try out.print("No relevant results found for: {s}\n", .{query_text.items});
         return;
     }
 
     // Format and print results
-    std.debug.print("Query: {s}\n", .{result.query});
-    std.debug.print("Found {d} relevant contexts:\n\n", .{result.contexts.items.len});
+    try out.print("Query: {s}\n", .{result.query});
+    try out.print("Found {d} relevant contexts:\n\n", .{result.contexts.items.len});
 
     for (result.contexts.items, 0..) |ctx, idx| {
-        std.debug.print("--- Context {d} (score: {d:.3}) ---\n", .{ idx + 1, ctx.score });
+        try out.print("--- Context {d} (score: {d:.3}) ---\n", .{ idx + 1, ctx.score });
         if (ctx.source) |src| {
-            std.debug.print("Source: {s}\n", .{src});
+            try out.print("Source: {s}\n", .{src});
         }
         if (ctx.heading) |heading| {
-            std.debug.print("Section: {s}\n", .{heading});
+            try out.print("Section: {s}\n", .{heading});
         }
-        std.debug.print("{s}\n\n", .{ctx.content});
+        try out.print("{s}\n\n", .{ctx.content});
     }
 }
 
 fn handleStats(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const out = stdout();
     const index_path = getIndexPath(args);
 
     var rag_instance = try Eternal.Rag.init(allocator);
@@ -271,15 +274,15 @@ fn handleStats(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var stats = try rag_instance.getStats();
     defer stats.deinit(allocator);
 
-    std.debug.print("Index Statistics:\n", .{});
-    std.debug.print("  Index path: {s}\n", .{index_path});
-    std.debug.print("  Documents: {d}\n", .{stats.num_documents});
-    std.debug.print("  Chunks: {d}\n", .{stats.num_chunks});
+    try out.print("Index Statistics:\n", .{});
+    try out.print("  Index path: {s}\n", .{index_path});
+    try out.print("  Documents: {d}\n", .{stats.num_documents});
+    try out.print("  Chunks: {d}\n", .{stats.num_chunks});
 
     if (stats.sources.items.len > 0) {
-        std.debug.print("\nIndexed files:\n", .{});
+        try out.print("\nIndexed files:\n", .{});
         for (stats.sources.items) |source| {
-            std.debug.print("  - {s}\n", .{source});
+            try out.print("  - {s}\n", .{source});
         }
     }
 }
@@ -297,7 +300,7 @@ fn handleClear(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return err;
     };
 
-    std.debug.print("Index cleared: {s}\n", .{index_path});
+    stdout().print("Index cleared: {s}\n", .{index_path}) catch {};
 }
 
 test "main module" {

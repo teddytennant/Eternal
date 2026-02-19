@@ -43,7 +43,7 @@ Ensure you have [Zig](https://ziglang.org/download/) (0.15.2 or later) installed
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/eternal
+git clone https://github.com/teddytennant/Eternal
 cd eternal
 
 # Build for release (optimized)

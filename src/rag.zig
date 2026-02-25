@@ -256,7 +256,7 @@ pub const Rag = struct {
         if (self.indexed_files.fetchRemove(path)) |kv| {
             self.allocator.free(kv.key);
             for (kv.value.items) |id| {
-                _ = self.store.remove(id);
+                _ = try self.store.remove(id);
             }
             var val = kv.value;
             val.deinit(self.allocator);

@@ -101,7 +101,10 @@ fn getTopK(args: []const []const u8) usize {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--top-k") and i + 1 < args.len) {
-            return std.fmt.parseInt(usize, args[i + 1], 10) catch 5;
+            return std.fmt.parseInt(usize, args[i + 1], 10) catch {
+                std.debug.print("Warning: Invalid --top-k value, defaulting to 5\n", .{});
+                return 5;
+            };
         }
     }
     return 5;

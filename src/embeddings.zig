@@ -1,6 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+pub const EmbeddingError = error{
+    /// The input text produced no tokens after filtering stop words.
+    /// This typically means the query consisted entirely of stop words.
+    EmptyEmbedding,
+};
+
 /// A sparse vector representation using term frequencies
 pub const SparseVector = struct {
     /// Map from term hash to weight
@@ -99,9 +105,8 @@ pub const TfIdfEmbedder = struct {
             "its",     "they",  "them",  "their", "what",    "which",   "who",
         };
 
-        // Pre-allocate to ensure capacity
-        try self.stop_word_hashes.ensureTotalCapacity(allocator, @intCast(stop_word_list.len));
-
+        // Force hashmap to grow manually one by one to avoid alignment logic in ensureTotalCapacity?
+        // Or simply ignoring pre-allocation entirely for this debug step.
         for (stop_word_list) |word| {
             const hash = hashTermStatic(word);
             // Use putContext for better safety with unmanaged maps
@@ -179,12 +184,6 @@ pub const TfIdfEmbedder = struct {
         return hash;
     }
 
-    /// Hash a term for storage (case-insensitive)
-    fn hashTerm(self: *TfIdfEmbedder, term: []const u8) u64 {
-        _ = self;
-        return hashTermStatic(term);
-    }
-
     /// Add a document to the corpus (updates IDF statistics)
     pub fn addDocument(self: *TfIdfEmbedder, text: []const u8) !void {
         var seen_terms: std.AutoHashMapUnmanaged(u64, void) = .{};
@@ -194,7 +193,7 @@ pub const TfIdfEmbedder = struct {
         defer tokens.deinit(self.allocator);
 
         for (tokens.items) |token| {
-            const hash = self.hashTerm(token);
+            const hash = hashTermStatic(token);
             if (!seen_terms.contains(hash)) {
                 try seen_terms.put(self.allocator, hash, {});
 
@@ -224,7 +223,7 @@ pub const TfIdfEmbedder = struct {
         defer term_counts.deinit(self.allocator);
 
         for (tokens.items) |token| {
-            const hash = self.hashTerm(token);
+            const hash = hashTermStatic(token);
             const current = term_counts.get(hash) orelse 0;
             try term_counts.put(self.allocator, hash, current + 1);
         }
@@ -232,7 +231,7 @@ pub const TfIdfEmbedder = struct {
         // Compute TF-IDF weights
         const num_tokens: f32 = @floatFromInt(tokens.items.len);
         if (num_tokens == 0) {
-            return vec;
+            return EmbeddingError.EmptyEmbedding;
         }
 
         var iter = term_counts.iterator();

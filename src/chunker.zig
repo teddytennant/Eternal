@@ -28,8 +28,6 @@ pub const ChunkerConfig = struct {
     target_chunk_size: usize = 512,
     /// Minimum chunk size - chunks smaller than this will be merged
     min_chunk_size: usize = 100,
-    /// Maximum chunk size - hard limit
-    max_chunk_size: usize = 1024,
     /// Overlap between consecutive chunks
     chunk_overlap: usize = 50,
     /// Whether to respect heading boundaries

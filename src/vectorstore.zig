@@ -131,7 +131,13 @@ pub const VectorStore = struct {
         }
 
         // Embed the query
-        var query_vec = try self.embedder.embed(query);
+        var query_vec = self.embedder.embed(query) catch |err| {
+            if (err == embeddings.EmbeddingError.EmptyEmbedding) {
+                std.log.warn("Query produced no tokens after filtering stop words: \"{s}\"", .{query});
+                return results;
+            }
+            return err;
+        };
         defer query_vec.deinit();
 
         // Use inverted index to find candidate documents (docs sharing at least one term)
@@ -204,14 +210,14 @@ pub const VectorStore = struct {
     }
 
     /// Remove a document by ID
-    pub fn remove(self: *VectorStore, id: u64) bool {
+    pub fn remove(self: *VectorStore, id: u64) !bool {
         for (self.documents.items, 0..) |*doc, idx| {
             if (doc.id == id) {
                 doc.deinit(self.allocator);
                 _ = self.documents.orderedRemove(idx);
 
                 // Rebuild inverted index since document indices shifted
-                self.rebuildInvertedIndex();
+                try self.rebuildInvertedIndex();
                 return true;
             }
         }
@@ -219,7 +225,7 @@ pub const VectorStore = struct {
     }
 
     /// Rebuild the inverted index from current documents
-    fn rebuildInvertedIndex(self: *VectorStore) void {
+    fn rebuildInvertedIndex(self: *VectorStore) !void {
         // Clear existing index
         var inv_iter = self.inverted_index.valueIterator();
         while (inv_iter.next()) |list| {
@@ -231,11 +237,11 @@ pub const VectorStore = struct {
         for (self.documents.items, 0..) |doc, idx| {
             var term_iter = doc.vector.terms.keyIterator();
             while (term_iter.next()) |term_hash| {
-                const result = self.inverted_index.getOrPut(self.allocator, term_hash.*) catch continue;
+                const result = try self.inverted_index.getOrPut(self.allocator, term_hash.*);
                 if (!result.found_existing) {
                     result.value_ptr.* = .{};
                 }
-                result.value_ptr.append(self.allocator, idx) catch continue;
+                try result.value_ptr.append(self.allocator, idx);
             }
         }
     }
@@ -464,7 +470,7 @@ pub const VectorStore = struct {
         }
 
         // Rebuild inverted index from loaded documents
-        store.rebuildInvertedIndex();
+        try store.rebuildInvertedIndex();
 
         return store;
     }
@@ -560,7 +566,7 @@ test "remove document" {
     const id = try store.addChunk(chunk);
     try std.testing.expectEqual(@as(usize, 1), store.count());
 
-    const removed = store.remove(id);
+    const removed = try store.remove(id);
     try std.testing.expect(removed);
     try std.testing.expectEqual(@as(usize, 0), store.count());
 }

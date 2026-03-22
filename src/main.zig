@@ -136,12 +136,19 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     const index_path = getIndexPath(args);
 
-    // Get the path to index (first non-option argument)
+    // Get the path to index (first non-option argument, skipping option values)
     var target_path: ?[]const u8 = null;
-    for (args) |arg| {
-        if (!std.mem.startsWith(u8, arg, "--")) {
-            target_path = arg;
-            break;
+    {
+        var j: usize = 0;
+        while (j < args.len) : (j += 1) {
+            if (std.mem.eql(u8, args[j], "--index-path")) {
+                j += 1; // Skip the option value
+                continue;
+            }
+            if (!std.mem.startsWith(u8, args[j], "--")) {
+                target_path = args[j];
+                break;
+            }
         }
     }
 

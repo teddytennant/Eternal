@@ -52,12 +52,14 @@ pub fn main() !void {
     printUsage();
 }
 
-fn stdout() std.fs.File.Writer {
-    return std.io.getStdOut().writer();
+fn stdoutWriter(buf: []u8) std.Io.Writer {
+    return std.fs.File.stdout().writer(buf).interface;
 }
 
 fn printUsage() void {
-    stdout().print(
+    var buf: [4096]u8 = undefined;
+    var w = stdoutWriter(&buf);
+    w.print(
         \\Eternal - Markdown-based RAG system for continual learning
         \\
         \\Usage: eternal <command> [options]
@@ -81,10 +83,14 @@ fn printUsage() void {
         \\  eternal stats
         \\
     , .{}) catch {};
+    w.flush() catch {};
 }
 
 fn printVersion() void {
-    stdout().print("Eternal v{s}\n", .{version}) catch {};
+    var buf: [256]u8 = undefined;
+    var w = stdoutWriter(&buf);
+    w.print("Eternal v{s}\n", .{version}) catch {};
+    w.flush() catch {};
 }
 
 fn getIndexPath(args: []const []const u8) []const u8 {
@@ -120,7 +126,8 @@ fn ensureIndexDir(index_path: []const u8) !void {
 }
 
 fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const out = stdout();
+    var buf: [4096]u8 = undefined;
+    var out = stdoutWriter(&buf);
 
     if (args.len == 0) {
         std.debug.print("Error: Please provide a path to index\n", .{});
@@ -181,10 +188,12 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try ensureIndexDir(index_path);
     try rag_instance.save(index_path);
     try out.print("Index saved to: {s}\n", .{index_path});
+    try out.flush();
 }
 
 fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const out = stdout();
+    var buf: [4096]u8 = undefined;
+    var out = stdoutWriter(&buf);
 
     if (args.len == 0) {
         std.debug.print("Error: Please provide a query\n", .{});
@@ -242,6 +251,7 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     if (result.contexts.items.len == 0) {
         try out.print("No relevant results found for: {s}\n", .{query_text.items});
+        try out.flush();
         return;
     }
 
@@ -259,10 +269,12 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
         try out.print("{s}\n\n", .{ctx.content});
     }
+    try out.flush();
 }
 
 fn handleStats(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const out = stdout();
+    var buf: [4096]u8 = undefined;
+    var out = stdoutWriter(&buf);
     const index_path = getIndexPath(args);
 
     var rag_instance = try Eternal.Rag.init(allocator);
@@ -288,6 +300,7 @@ fn handleStats(allocator: std.mem.Allocator, args: []const []const u8) !void {
             try out.print("  - {s}\n", .{source});
         }
     }
+    try out.flush();
 }
 
 fn handleClear(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -303,7 +316,10 @@ fn handleClear(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return err;
     };
 
-    stdout().print("Index cleared: {s}\n", .{index_path}) catch {};
+    var buf2: [256]u8 = undefined;
+    var w = stdoutWriter(&buf2);
+    w.print("Index cleared: {s}\n", .{index_path}) catch {};
+    w.flush() catch {};
 }
 
 test "main module" {

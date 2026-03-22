@@ -224,6 +224,29 @@ pub const VectorStore = struct {
         return false;
     }
 
+    /// Remove multiple documents by ID, rebuilding the inverted index only once
+    pub fn removeBatch(self: *VectorStore, ids: []const u64) !usize {
+        var removed: usize = 0;
+        // Remove in reverse order to avoid index shifting issues
+        var i: usize = self.documents.items.len;
+        while (i > 0) {
+            i -= 1;
+            const doc_id = self.documents.items[i].id;
+            for (ids) |id| {
+                if (doc_id == id) {
+                    self.documents.items[i].deinit(self.allocator);
+                    _ = self.documents.orderedRemove(i);
+                    removed += 1;
+                    break;
+                }
+            }
+        }
+        if (removed > 0) {
+            try self.rebuildInvertedIndex();
+        }
+        return removed;
+    }
+
     /// Rebuild the inverted index from current documents
     fn rebuildInvertedIndex(self: *VectorStore) !void {
         // Clear existing index

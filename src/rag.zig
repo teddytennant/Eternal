@@ -255,9 +255,7 @@ pub const Rag = struct {
     pub fn removeFile(self: *Rag, path: []const u8) !void {
         if (self.indexed_files.fetchRemove(path)) |kv| {
             self.allocator.free(kv.key);
-            for (kv.value.items) |id| {
-                _ = try self.store.remove(id);
-            }
+            _ = try self.store.removeBatch(kv.value.items);
             var val = kv.value;
             val.deinit(self.allocator);
         }

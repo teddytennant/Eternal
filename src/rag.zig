@@ -100,22 +100,7 @@ pub const Rag = struct {
     }
 
     pub fn initWithConfig(allocator: Allocator, config: RagConfig) !Rag {
-        // Force alignment for the store by allocating it separately on the heap
-        // This is a workaround for hash map alignment issues when embedded in a struct
-        // Note: Rag.store is a value, but internally it uses pointers.
-        // The issue is likely with Rag.indexed_files or VectorStore.inverted_index
-        // when Rag is stack allocated.
-
-        // Let's create the store first
         const store = try vectorstore.VectorStore.init(allocator);
-
-        // We can't easily change the return type to *Rag without breaking API.
-        // Instead, let's try to ensure the large structs inside are heap allocated where possible.
-        // VectorStore already holds pointers.
-
-        // The crash happens in header() calculation of a hash map.
-        // This suggests one of the hash maps is not aligned to 8 bytes.
-        // Stack allocation of Rag might be under-aligned.
 
         return Rag{
             .allocator = allocator,

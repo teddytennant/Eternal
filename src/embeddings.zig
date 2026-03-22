@@ -105,11 +105,8 @@ pub const TfIdfEmbedder = struct {
             "its",     "they",  "them",  "their", "what",    "which",   "who",
         };
 
-        // Force hashmap to grow manually one by one to avoid alignment logic in ensureTotalCapacity?
-        // Or simply ignoring pre-allocation entirely for this debug step.
         for (stop_word_list) |word| {
             const hash = hashTermStatic(word);
-            // Use putContext for better safety with unmanaged maps
             const result = try self.stop_word_hashes.getOrPut(allocator, hash);
             if (!result.found_existing) {
                 result.value_ptr.* = {};

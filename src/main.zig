@@ -118,11 +118,7 @@ fn getTopK(args: []const []const u8) usize {
 
 fn ensureIndexDir(index_path: []const u8) !void {
     const dir_path = std.fs.path.dirname(index_path) orelse return;
-    std.fs.cwd().makePath(dir_path) catch |err| {
-        if (err != error.PathAlreadyExists) {
-            return err;
-        }
-    };
+    try std.fs.cwd().makePath(dir_path);
 }
 
 fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {

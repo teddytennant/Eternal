@@ -39,23 +39,6 @@ pub const QueryResult = struct {
         self.contexts.deinit(self.allocator);
     }
 
-    /// Format contexts for display
-    pub fn format(self: *const QueryResult, writer: anytype) !void {
-        try writer.print("Query: {s}\n", .{self.query});
-        try writer.print("Found {d} relevant contexts:\n\n", .{self.contexts.items.len});
-
-        for (self.contexts.items, 0..) |ctx, i| {
-            try writer.print("--- Context {d} (score: {d:.3}) ---\n", .{ i + 1, ctx.score });
-            if (ctx.source) |src| {
-                try writer.print("Source: {s}\n", .{src});
-            }
-            if (ctx.heading) |heading| {
-                try writer.print("Section: {s}\n", .{heading});
-            }
-            try writer.print("{s}\n\n", .{ctx.content});
-        }
-    }
-
     /// Get combined context as a single string
     pub fn getCombinedContext(self: *const QueryResult, allocator: Allocator) ![]u8 {
         var result: std.ArrayListUnmanaged(u8) = .{};

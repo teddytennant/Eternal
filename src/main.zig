@@ -75,6 +75,7 @@ fn printUsage() void {
         \\Options:
         \\  --index-path <path>   Path to the index file (default: .eternal/index.bin)
         \\  --top-k <n>           Number of results to return (default: 5)
+        \\  --verbose, -V         Enable verbose output for debugging
         \\
         \\Examples:
         \\  eternal index ./docs/
@@ -101,6 +102,15 @@ fn getIndexPath(args: []const []const u8) []const u8 {
         }
     }
     return ".eternal/index.bin";
+}
+
+fn getVerbose(args: []const []const u8) bool {
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-V")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn getTopK(args: []const []const u8) usize {
@@ -131,6 +141,7 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     const index_path = getIndexPath(args);
+    const verbose = getVerbose(args);
 
     // Get the path to index (first non-option argument, skipping option values)
     var target_path: ?[]const u8 = null;
@@ -154,13 +165,18 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     try out.print("Indexing: {s}\n", .{target_path.?});
+    if (verbose) {
+        try out.print("[verbose] Index path: {s}\n", .{index_path});
+    }
 
     var rag_instance = try Eternal.Rag.init(allocator);
     defer rag_instance.deinit();
 
     // Try to load existing index
     rag_instance.load(index_path) catch {
-        // Index doesn't exist yet, that's fine
+        if (verbose) {
+            try out.print("[verbose] No existing index found, creating new\n", .{});
+        }
     };
 
     // Check if path is a file or directory
@@ -171,6 +187,14 @@ fn handleIndex(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
         return err;
     };
+
+    if (verbose) {
+        if (stat.kind == .directory) {
+            try out.print("[verbose] Target is a directory\n", .{});
+        } else {
+            try out.print("[verbose] Target is a file\n", .{});
+        }
+    }
 
     var num_chunks: usize = 0;
     var num_docs: usize = 0;
@@ -205,6 +229,7 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     const index_path = getIndexPath(args);
     const top_k = getTopK(args);
+    const verbose = getVerbose(args);
 
     // Build query from non-option arguments
     var query_parts: std.ArrayListUnmanaged([]const u8) = .{};
@@ -235,6 +260,12 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try query_text.appendSlice(allocator, part);
     }
 
+    if (verbose) {
+        try out.print("[verbose] Index path: {s}\n", .{index_path});
+        try out.print("[verbose] Top-k: {d}\n", .{top_k});
+        try out.print("[verbose] Query text: {s}\n", .{query_text.items});
+    }
+
     const config = Eternal.RagConfig{
         .top_k = top_k,
     };
@@ -248,6 +279,10 @@ fn handleQuery(allocator: std.mem.Allocator, args: []const []const u8) !void {
         std.debug.print("Run 'eternal index <path>' first to create an index.\n", .{});
         return;
     };
+
+    if (verbose) {
+        try out.print("[verbose] Index loaded successfully\n", .{});
+    }
 
     var result = try rag_instance.query(query_text.items);
     defer result.deinit();
